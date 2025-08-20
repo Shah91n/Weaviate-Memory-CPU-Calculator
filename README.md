@@ -2,6 +2,10 @@
 
 **🎯 Resource planning tool for Weaviate vector database deployments**
 
+<a href="https://weaviate-memory-cpu-calculator.streamlit.app/">
+  Visit Weaviate Memory & CPU Calculator Web App
+</a>
+
 Beginner-friendly calculator based on [official Weaviate documentation](https://weaviate.io/developers/weaviate/concepts/resources) to help you plan memory, CPU, and storage requirements for your vector database deployment.
 
 ## 🚀 Features
