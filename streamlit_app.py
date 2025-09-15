@@ -252,7 +252,7 @@ def display_results(results: ResourceEstimate, params: dict):
 		st.metric(
 			"Disk Storage",
 			f"{results.disk_storage_gb:.1f} GB",
-			help="Including 20% overhead for indexes"
+			help="Objects + Vectors (original + compressed if enabled); plus 20% overhead"
 		)
 		
 		st.info("**For detailed disk calculations, visit 🔗 :** [Weaviate Disk Storage Calculator](https://weaviate-disk-calculator.streamlit.app/)")
@@ -286,96 +286,82 @@ def display_results(results: ResourceEstimate, params: dict):
 	compression_df = pd.DataFrame(compression_data)
 	st.dataframe(compression_df, use_container_width=True)
 
+	# Memory composition across all compression methods
+	methods = [
+		"No Compression",
+		"Product Quantization (PQ)",
+		"Binary Quantization (BQ)",
+		"Scalar Quantization (SQ)",
+		"Rotational Quantization 8-bit (RQ)",
+		"Rotational Quantization 1-bit (RQ)"
+	]
+	vector_factors = [1.0, 0.15, 0.03, 0.25, 0.25, 0.03]
+	vectors_series = [results.vectors_memory_gb * f * 2 for f in vector_factors]
+	connections_series = [results.connections_memory_gb for _ in methods]
+
+	fig_all = go.Figure(data=[
+		go.Bar(name='Vectors (with GC)', x=methods, y=vectors_series, text=[f"{v:.1f} GB" for v in vectors_series], textposition='auto'),
+		go.Bar(name='HNSW Connections', x=methods, y=connections_series, text=[f"{c:.1f} GB" for c in connections_series], textposition='auto')
+	])
+	fig_all.update_layout(title="Memory Composition Across Compression Methods", yaxis_title="Memory (GB)", barmode='stack', height=420)
+	st.plotly_chart(fig_all, use_container_width=True)
+
 	# Memory breakdown
 	st.markdown("---")
 	st.subheader("💾 Memory Breakdown")
 
-	col1, col2 = st.columns(2)
+	st.markdown("**📐 Calculation Details**")
 
-	with col1:
-		# Memory composition chart
-		fig = go.Figure(data=[
-			go.Bar(
-				name='Vectors',
-				x=['No Compression', 'With PQ'],
-				y=[results.vectors_memory_gb * 2, results.vectors_memory_gb * 0.15 * 2],
-				text=[f"{results.vectors_memory_gb * 2:.1f} GB", 
-					f"{results.vectors_memory_gb * 0.15 * 2:.1f} GB"],
-				textposition='auto',
-			),
-			go.Bar(
-				name='HNSW Connections',
-				x=['No Compression', 'With PQ'],
-				y=[results.connections_memory_gb, results.connections_memory_gb],
-				text=[f"{results.connections_memory_gb:.1f} GB", 
-					f"{results.connections_memory_gb:.1f} GB"],
-				textposition='auto',
-			)
-		])
+	st.code(f"""
+					# Vector Memory (No Compression)
+					Dimensions: {params['dimensions']}
+					Objects: {format_number(params['num_objects'])}
+					Bytes per vector: {params['dimensions']} × 4 = {params['dimensions'] * 4:,} bytes
+					Total vector memory: {results.vectors_memory_gb:.2f} GB
+					With GC overhead (2x): {results.vectors_memory_gb * 2:.2f} GB
+				
+					# HNSW Connections Memory
+					Max connections: {params['max_connections']}
+					Avg connections: {params['max_connections'] * 1.5:.0f} connections
+					Bytes per connection: 10
+					Total connections memory: {results.connections_memory_gb:.2f} GB
+					
+					Total Memory: {results.memory_gb:.2f} GB. Recommended (+25%): {results.recommended_memory_gb:.2f} GB.
+				""", language="python")
+	
+	st.markdown("---")
+	st.subheader("⚡ CPU Breakdown")
+	st.info("Latency ↔ CPU cores: QPS/core ≈ 1000 ÷ latency. So at 10ms ≈ 100 QPS/core → fewer cores; at 1000ms ≈ 1 QPS/core → more cores, for the same target QPS.")
 
-		fig.update_layout(
-			title="Memory Composition",
-			yaxis_title="Memory (GB)",
-			barmode='stack',
-			height=400
-		)
-		st.plotly_chart(fig, use_container_width=True)
+	target_qps = params['target_qps']
+	expected_latency = params['expected_latency']
 
-	with col2:
-		# Calculation details
-		st.markdown("**📐 Calculation Details**")
+	theoretical_qps_per_core = 1000.0 / expected_latency
+	realistic_qps_per_core = theoretical_qps_per_core * 0.8
 
-		st.code(f"""
-		             # Vector Memory (No Compression)
-		             Dimensions: {params['dimensions']}
-		             Objects: {format_number(params['num_objects'])}
-		             Bytes per vector: {params['dimensions']} × 4 = {params['dimensions'] * 4:,} bytes
-		             Total vector memory: {results.vectors_memory_gb:.2f} GB
-		             With GC overhead (2x): {results.vectors_memory_gb * 2:.2f} GB
-		         
-		             # HNSW Connections Memory
-		             Max connections: {params['max_connections']}
-		             Avg connections: {params['max_connections'] * 1.5:.0f} connections
-		             Bytes per connection: 10
-		             Total connections memory: {results.connections_memory_gb:.2f} GB
-		         
-		             # Total Memory
-		             Rule of thumb: {results.memory_gb:.2f} GB
-		             Recommended (+25%): {results.recommended_memory_gb:.2f} GB
-		         """, language="python")
+	st.code(f"""
+					# CPU Requirements
+					Target QPS: {target_qps}
+					Expected latency: {expected_latency}ms
+					Theoretical QPS/core: 1000ms ÷ {expected_latency}ms = {theoretical_qps_per_core:.1f}
+					Real-world QPS/core: {theoretical_qps_per_core:.1f} × 0.8 = {realistic_qps_per_core:.1f}
+					Min cores needed: {target_qps} ÷ {realistic_qps_per_core:.1f} = {results.min_cpu_cores}
+					Recommended: {results.min_cpu_cores} × 2 = {results.recommended_cpu_cores} cores
+				""", language="python")
 
-		st.markdown("**⚡ CPU Calculation**")
-		st.info("Latency ↔ CPU cores: QPS/core ≈ 1000 ÷ latency. So at 10ms ≈ 100 QPS/core → fewer cores; at 1000ms ≈ 1 QPS/core → more cores, for the same target QPS.")
+	st.subheader("**💿 Disk Storage Breakdown**")
 
-		target_qps = params['target_qps']
-		expected_latency = params['expected_latency']
+	st.code(f"""
+					# Basic Disk Storage
+					Vector storage: {results.vectors_memory_gb:.2f} GB
+					Objects: {format_number(params['num_objects'])} × 4KB = {(params['num_objects'] * 4 / 1024 / 1024):.2f} GB
+					System overhead (20%): +{results.disk_storage_gb * 0.2:.2f} GB
+					Total disk: {results.disk_storage_gb:.2f} GB
+				
+					Note: With compression, both original + compressed stored
+				""", language="python")
 
-		theoretical_qps_per_core = 1000.0 / expected_latency
-		realistic_qps_per_core = theoretical_qps_per_core * 0.8
-
-		st.code(f"""
-		             # CPU Requirements
-		             Target QPS: {target_qps}
-		             Expected latency: {expected_latency}ms
-		             Theoretical QPS/core: 1000ms ÷ {expected_latency}ms = {theoretical_qps_per_core:.1f}
-		             Real-world QPS/core: {theoretical_qps_per_core:.1f} × 0.8 = {realistic_qps_per_core:.1f}
-		             Min cores needed: {target_qps} ÷ {realistic_qps_per_core:.1f} = {results.min_cpu_cores}
-		             Recommended: {results.min_cpu_cores} × 2 = {results.recommended_cpu_cores} cores
-		         """, language="python")
-
-		st.markdown("**💿 Disk Storage Calculation**")
-
-		st.code(f"""
-		             # Basic Disk Storage
-		             Vector storage: {results.vectors_memory_gb:.2f} GB
-		             Objects: {format_number(params['num_objects'])} × 4KB = {(params['num_objects'] * 4 / 1024 / 1024):.2f} GB
-		             System overhead (20%): +{results.disk_storage_gb * 0.2:.2f} GB
-		             Total disk: {results.disk_storage_gb:.2f} GB
-		         
-		             Note: With compression, both original + compressed stored
-		         """, language="python")
-
-		st.info("🔗 **Need advanced or custom disk storage estimates?** Try 🔗 [Weaviate Disk Storage Calculator](https://weaviate-disk-calculator.streamlit.app/) for in-depth scenarios and edge cases. [View Source Code](https://github.com/Shah91n/Weaviate-Disk-Storage-Calculator)")
+	st.info("🔗 **Need advanced or custom disk storage estimates?** Try 🔗 [Weaviate Disk Storage Calculator](https://weaviate-disk-calculator.streamlit.app/) for in-depth scenarios and edge cases. [View Source Code](https://github.com/Shah91n/Weaviate-Disk-Storage-Calculator)")
 
 	# Recommendations
 	st.markdown("---")
