@@ -1,8 +1,3 @@
-"""
-Weaviate Memory & CPU Calculator
-Based on official Weaviate documentation for resource planning
-"""
-
 from dataclasses import dataclass
 from enum import Enum
 import math
@@ -12,7 +7,8 @@ class CompressionType(Enum):
 	PQ = "pq" # Product Quantization: 85% reduction, requires training
 	BQ = "bq" # Binary Quantization: 97% reduction, no training
 	SQ = "sq" # Scalar Quantization: 75% reduction, requires training  
-	RQ = "rq" # Rotational Quantization: 75% reduction, no training (v1.26+)
+	RQ_8BIT = "rq_8bit" # Rotational Quantization 8-bit: 75% reduction, no training (v1.32+)
+	RQ_1BIT = "rq_1bit" # Rotational Quantization 1-bit: 97% reduction, no training (v1.32+)
 
 @dataclass
 class ResourceEstimate:
@@ -21,7 +17,8 @@ class ResourceEstimate:
 	memory_gb_with_pq: float
 	memory_gb_with_bq: float
 	memory_gb_with_sq: float
-	memory_gb_with_rq: float
+	memory_gb_with_rq_8bit: float
+	memory_gb_with_rq_1bit: float
 	disk_storage_gb: float
 	min_cpu_cores: int
 	recommended_cpu_cores: int
@@ -92,8 +89,10 @@ class WeaviateResourceCalculator:
 			compression_factor = 0.03 # 97% reduction  
 		elif compression == CompressionType.SQ:
 			compression_factor = 0.25 # 75% reduction
-		elif compression == CompressionType.RQ:
+		elif compression == CompressionType.RQ_8BIT:
 			compression_factor = 0.25 # 75% reduction (no training required)
+		elif compression == CompressionType.RQ_1BIT:
+			compression_factor = 0.03 # 97% reduction (no training required)
 		else:
 			compression_factor = 1.0
 
@@ -133,8 +132,10 @@ class WeaviateResourceCalculator:
 				compressed_factor = 0.03
 			elif compression == CompressionType.SQ:
 				compressed_factor = 0.25
-			elif compression == CompressionType.RQ:
+			elif compression == CompressionType.RQ_8BIT:
 				compressed_factor = 0.25
+			elif compression == CompressionType.RQ_1BIT:
+				compressed_factor = 0.03
 			else:
 				compressed_factor = 1.0
 
@@ -197,21 +198,21 @@ class WeaviateResourceCalculator:
 		
 		Returns: (deployment_type, instance_recommendation, notes)
 		"""
-		if num_objects < 100_000:
+		if num_objects <= 100_000:
 			return (
 				"Single Docker Container", 
 				"4-8 GB RAM, 2-4 CPU cores",
 				"Perfect for development and small projects"
 			)
-		elif num_objects < 1_000_000:
+		elif num_objects <= 1_000_000:
 			return (
 				"Docker Compose", 
 				"8-16 GB RAM, 4-8 CPU cores", 
 				"Good for production with <1M vectors"
 			)
-		elif num_objects < 10_000_000:
+		elif num_objects <= 10_000_000:
 			return (
-				"Kubernetes (2-3 nodes)", 
+				"Kubernetes (3 nodes)", 
 				"32-64 GB RAM, 16-32 CPU cores per node",
 				"Recommended for serious production workloads"
 			)
@@ -233,8 +234,8 @@ class WeaviateResourceCalculator:
 		if memory_gb > 50 and compression == CompressionType.NONE:
 			tips.append("💡 Consider enabling Product Quantization (PQ) to reduce memory by 85%")
 
-		if memory_gb > 100 and compression in [CompressionType.NONE, CompressionType.SQ, CompressionType.RQ]:
-			tips.append("💡 For extreme memory savings, try Binary Quantization (BQ) - 97% reduction")
+		if memory_gb > 100 and compression in [CompressionType.NONE, CompressionType.SQ, CompressionType.RQ_8BIT, CompressionType.RQ_1BIT]:
+			tips.append("💡 For extreme memory savings, try Binary Quantization (BQ) or Rotational Quantization (RQ) for 97% reduction")
 
 		# HNSW optimization
 		if max_connections > 32 and dimensions >= 768:
@@ -281,7 +282,8 @@ class WeaviateResourceCalculator:
 		memory_with_pq = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.PQ)
 		memory_with_bq = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.BQ)
 		memory_with_sq = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.SQ)
-		memory_with_rq = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.RQ)
+		memory_with_rq_8bit = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.RQ_8BIT)
+		memory_with_rq_1bit = self.calculate_total_memory(vectors_memory_gb, connections_memory_gb, CompressionType.RQ_1BIT)
 
 		# Calculate disk storage
 		disk_storage_gb = self.calculate_disk_storage(num_objects, dimensions, object_size_kb, compression)
@@ -300,7 +302,8 @@ class WeaviateResourceCalculator:
 			memory_gb_with_pq=memory_with_pq,
 			memory_gb_with_bq=memory_with_bq,
 			memory_gb_with_sq=memory_with_sq,
-			memory_gb_with_rq=memory_with_rq,
+			memory_gb_with_rq_8bit=memory_with_rq_8bit,
+			memory_gb_with_rq_1bit=memory_with_rq_1bit,
 			disk_storage_gb=disk_storage_gb,
 			min_cpu_cores=min_cpu_cores,
 			recommended_cpu_cores=recommended_cpu_cores,
@@ -311,30 +314,24 @@ class WeaviateResourceCalculator:
 			compression_savings_gb=compression_savings_gb
 		)
 
-# Embedding models with latest 2025 offerings and dimensions
+# Embedding models with dimensions for different providers - updated for 2025
 EMBEDDING_MODELS = {
 	"OpenAI": {
 		"text-embedding-3-large": 3072,
 		"text-embedding-3-small": 1536
 	},
-	"Google Gemini": {
+	"Google": {
 		"gemini-embedding-001": 3072,
-		"text-multilingual-embedding-002": 768
 	},
 	"Cohere": {
-		"embed-v4": 1536,
-		"embed-multilingual-v3.0": 1024
+		"embed-multilingual-v3.0": 1024,
+		"embed-english-v3.0": 1024
 	},
-	"Anthropic/Voyage": {
+	"Voyage": {
 		"voyage-large-2": 1536,
-		"voyage-code-2": 1536,
-		"voyage-2": 1024,
+		"voyage-2": 1024
 	},
 	"Mistral": {
-		"mistral-embed": 1024,
-		"mistral-embed-large": 1024,
-	},
-	"Custom/Other": {
-		"Custom dimensions": 768, # Default placeholder
+		"mistral-embed": 1024
 	}
 }
