@@ -1,10 +1,11 @@
-# Weaviate Memory & CPU Calculator
+# Weaviate Memory & CPU Calculator <img alt='Weaviate logo' src='https://weaviate.io/img/site/weaviate-logo-light.png' width='148' align='right' />
+
+[![Weaviate](https://img.shields.io/static/v1?label=for&message=Weaviate%20%E2%9D%A4&color=green&style=flat-square)](https://weaviate.io/)
+[![GitHub Repo stars](https://img.shields.io/github/stars/Shah91n/Weaviate-Memory-CPU-Calculator?style=social)](https://github.com/Shah91n/Weaviate-Memory-CPU-Calculator)
+[![Streamlit App](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat-square&logo=streamlit&logoColor=white)](https://weaviate-memory-cpu-calculator.streamlit.app/)
+[![Python](https://img.shields.io/badge/Python-3.8+-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
 
 **🎯 Memory & CPU planning tool for Weaviate vector database deployments**
-
-[![Streamlit App](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://weaviate-memory-cpu-calculator.streamlit.app/)
-[![Python](https://img.shields.io/badge/Python-3.8+-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
 
 Beginner-friendly Estimator based on [official Weaviate documentation](https://weaviate.io/developers/weaviate/concepts/resources) to help you plan memory and CPU requirements for your vector database deployment.
 
