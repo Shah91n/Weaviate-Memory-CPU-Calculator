@@ -7,6 +7,8 @@
 
 **🎯 Memory & CPU planning tool for Weaviate vector database deployments**
 
+<img width="1793" height="636" alt="image" src="https://github.com/user-attachments/assets/8fc89c48-59bd-4fdf-985b-2556c01e2837" />
+
 Beginner-friendly Estimator based on [official Weaviate documentation](https://weaviate.io/developers/weaviate/concepts/resources) to help you plan memory and CPU requirements for your vector database deployment.
 
 ## ✨ Key Features
