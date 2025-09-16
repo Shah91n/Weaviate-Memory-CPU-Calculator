@@ -81,6 +81,13 @@ def main():
 
 	with tab3:
 		references_tab()
+	
+	st.markdown("---")
+	st.caption("This calculator provides estimates based on Weaviate documentation. Actual Memory & CPU may vary.")
+	st.caption(
+		'Created by [Mohamed Shahin](https://github.com/Shah91n) · '
+		'Source code on [GitHub](https://github.com/Shah91n/Weaviate-Memory-CPU-Calculator)'
+	)
 
 def calculator_tab(calculate_clicked=False):
 	"""Main calculator interface"""
@@ -637,9 +644,7 @@ def references_tab():
 	            ---
 	            
 	            > 💡 **Disclaimer:** This calculator is based on formulas and guidance from [Weaviate's official documentation](https://weaviate.io/developers/weaviate/concepts/resources).  
-	            The results are intended as practical estimates for most scenarios. For mission-critical or production deployments, always validate with your own data and perform real-world benchmarking.  
-  
-	            _Tool developed by [Mohamed Shahin](https://github.com/Shah91n)._
+	            The results are intended as practical estimates for most scenarios. For mission-critical or production deployments, always validate with your own data and perform real-world benchmarking.
 	            """)
 
 if __name__ == "__main__":
