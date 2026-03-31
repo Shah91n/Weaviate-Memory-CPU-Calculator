@@ -14,7 +14,7 @@ Beginner-friendly Estimator based on [official Weaviate documentation](https://w
 ## ✨ Key Features
 
 ### 🧮 **Accurate Calculations**
-- **Memory**: 2x GC overhead rule + HNSW connections (1.5x avg)
+- **Memory**: Go Heap → GOMEMLIMIT → Container sizing pipeline with HNSW connections (1.5× avg, 4B each)
 - **CPU**: Official formula `1000ms ÷ latency × 80% efficiency`
 - **Storage**: Vector + metadata + 20% overhead
 - **All compression types**: PQ, BQ, SQ, RQ 8-bit, RQ 1-bit
@@ -64,14 +64,23 @@ docker run -p 8501:8501 weaviate-calculator
 
 ### Memory Calculation
 ```python
-# Vector memory (with 2x GC overhead)
-vector_memory = objects × dimensions × 4 bytes × 2
+# Vector data
+vector_data = objects × dimensions × 4 bytes
 
-# HNSW connections (1.5x average)
-connections = objects × maxConnections × 1.5 × 10 bytes
+# Vector cache overhead (+30B per vector)
+vector_overhead = objects × 30 bytes
 
-# Total memory
-total = vector_memory + connections
+# HNSW connections (1.5x average, 4B per connection)
+connections = objects × maxConnections × 1.5 × 4 bytes
+
+# Go Heap (vectors + connections + overhead)
+go_heap = vector_data + vector_overhead + connections
+
+# GOMEMLIMIT (Go Heap + 10% GC headroom)
+gomemlimit = go_heap × 1.10
+
+# Container memory (GOMEMLIMIT + 20% OS/runtime headroom)
+container_memory = gomemlimit × 1.20
 ```
 
 ### CPU Calculation

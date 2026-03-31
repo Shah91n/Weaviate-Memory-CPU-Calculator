@@ -6,7 +6,6 @@ import os
 from weaviate_calculator import (
 	WeaviateResourceCalculator, 
 	CompressionType, 
-	EMBEDDING_MODELS,
 	ResourceEstimate
 )
 
@@ -30,7 +29,7 @@ if 'results' not in st.session_state:
 
 def clear_session_state():
 	"""Clear all session state and reset the app"""
-	print("clear_session_state called")
+
 	for key in list(st.session_state.keys()):
 		del st.session_state[key]
 	st.cache_data.clear()
@@ -108,27 +107,14 @@ def calculator_tab(calculate_clicked=False):
 
 		# Vector dimensions
 		st.markdown("**Vector Dimensions**")
-		dimension_source = st.radio(
-			"Select dimension source:",
-			["Embedding Model", "Custom Dimensions"],
-			horizontal=True
+		dimensions = st.number_input(
+			"Vector Dimensions",
+			min_value=1,
+			max_value=10000,
+			value=1536,
+			step=1,
+			help="Number of dimensions per vector (e.g. 768, 1536, 3072)"
 		)
-
-		if dimension_source == "Embedding Model":
-			provider = st.selectbox("Provider", list(EMBEDDING_MODELS.keys()))
-			model = st.selectbox("Model", list(EMBEDDING_MODELS[provider].keys()))
-			dimensions = EMBEDDING_MODELS[provider][model]
-			st.info(f"**{dimensions} dimensions** for {model}")
-		else:
-			dimensions = st.number_input(
-				"Enter Vector Dimensions",
-				min_value=1,
-				max_value=10000,
-				value=768,
-				step=1,
-				help="Enter the number of dimensions per vector (e.g., 768, 1536, 3072)"
-			)
-			st.info(f"**{dimensions} dimensionality**")
 
 		st.markdown("**Performance Requirements**")
 		target_qps = st.number_input(
@@ -200,7 +186,6 @@ def calculator_tab(calculate_clicked=False):
 			st.info("👈 Configure parameters and click 'Calculate Resources' to see results")
 
 def display_results(results: ResourceEstimate, params: dict):
-	"""Display calculation results"""
 	st.subheader("📊 Resource Requirements")
 	
 	st.info("⚠️ **Important:** This estimate is for the HNSW index only. The flat index will use dramatically less RAM as it performs brute-force searches from disk.")
@@ -220,6 +205,7 @@ def display_results(results: ResourceEstimate, params: dict):
 			"Product Quantization (PQ)",
 			f"{results.memory_gb_with_pq:.1f} GB",
 			f"-{((1 - results.memory_gb_with_pq/results.memory_gb) * 100):.0f}%",
+			delta_color="inverse",
 			help="85% reduction, requires training"
 		)
 
@@ -228,12 +214,14 @@ def display_results(results: ResourceEstimate, params: dict):
 			"Binary Quantization (BQ)",
 			f"{results.memory_gb_with_bq:.1f} GB",
 			f"-{((1 - results.memory_gb_with_bq/results.memory_gb) * 100):.0f}%",
+			delta_color="inverse",
 			help="97% reduction, no training"
 		)
 		st.metric(
 			"Scalar Quantization (SQ)",
 			f"{results.memory_gb_with_sq:.1f} GB",
 			f"-{((1 - results.memory_gb_with_sq/results.memory_gb) * 100):.0f}%",
+			delta_color="inverse",
 			help="75% reduction, requires training"
 		)
 
@@ -242,14 +230,25 @@ def display_results(results: ResourceEstimate, params: dict):
 			"RQ 8-bit",
 			f"{results.memory_gb_with_rq_8bit:.1f} GB",
 			f"-{((1 - results.memory_gb_with_rq_8bit/results.memory_gb) * 100):.0f}%",
+			delta_color="inverse",
 			help="75% reduction, no training"
 		)
 		st.metric(
 			"RQ 1-bit",
 			f"{results.memory_gb_with_rq_1bit:.1f} GB",
 			f"-{((1 - results.memory_gb_with_rq_1bit/results.memory_gb) * 100):.0f}%",
+			delta_color="inverse",
 			help="97% reduction, no training"
 		)
+
+	st.subheader("📐 Memory Sizing Pipeline (No Compression)")
+	p1, p2, p3 = st.columns(3)
+	with p1:
+		st.metric("Go Heap", f"{results.go_heap_gb:.1f} GB", help="Vector cache + HNSW connections + 2 GB buffer")
+	with p2:
+		st.metric("GOMEMLIMIT", f"{results.gomemlimit_gb:.1f} GB", help="Go Heap × 1.2 (20% headroom)")
+	with p3:
+		st.metric("Container Memory", f"{results.memory_gb:.1f} GB", help="GOMEMLIMIT / 0.8")
 
 	# System requirements
 	st.subheader("💻 CPU & Disk Requirements")
@@ -285,13 +284,13 @@ def display_results(results: ResourceEstimate, params: dict):
 	compression_data = {
 		"Method": ["No Compression", "Product Quantization (PQ)", "Binary Quantization (BQ)", "Scalar Quantization (SQ)", "Rotational Quantization 8-bit (RQ)", "Rotational Quantization 1-bit (RQ)"],
 		"Memory (GB)": [results.memory_gb, results.memory_gb_with_pq, results.memory_gb_with_bq, results.memory_gb_with_sq, results.memory_gb_with_rq_8bit, results.memory_gb_with_rq_1bit],
-		"Reduction": ["0%", "85%", "97%", "75%", "75%", "97%"],
+		"Reduction": ["—", "~85% vector", "~97% vector", "~75% vector", "~75% vector", "~97% vector"],
 		"Training Required": ["❌", "✅", "❌", "✅", "❌", "❌"],
 		"Notes": ["Full precision", "Best balance", "Maximum savings", "Fast compression", "No training, 8-bit", "No training, 1-bit"]
 	}
 
 	compression_df = pd.DataFrame(compression_data)
-	st.dataframe(compression_df, use_container_width=True)
+	st.dataframe(compression_df, width="stretch")
 
 	# Memory composition across all compression methods
 	methods = [
@@ -303,15 +302,18 @@ def display_results(results: ResourceEstimate, params: dict):
 		"Rotational Quantization 1-bit (RQ)"
 	]
 	vector_factors = [1.0, 0.15, 0.03, 0.25, 0.25, 0.03]
-	vectors_series = [results.vectors_memory_gb * f * 2 for f in vector_factors]
+	vectors_series = [results.vector_data_gb * f + results.vector_overhead_gb for f in vector_factors]
 	connections_series = [results.connections_memory_gb for _ in methods]
+	container_memories = [results.memory_gb, results.memory_gb_with_pq, results.memory_gb_with_bq, results.memory_gb_with_sq, results.memory_gb_with_rq_8bit, results.memory_gb_with_rq_1bit]
+	overhead_series = [c - v - conn for c, v, conn in zip(container_memories, vectors_series, connections_series)]
 
 	fig_all = go.Figure(data=[
-		go.Bar(name='Vectors (with GC)', x=methods, y=vectors_series, text=[f"{v:.1f} GB" for v in vectors_series], textposition='auto'),
-		go.Bar(name='HNSW Connections', x=methods, y=connections_series, text=[f"{c:.1f} GB" for c in connections_series], textposition='auto')
+		go.Bar(name='Vector Cache', x=methods, y=vectors_series, text=[f"{v:.1f} GB" for v in vectors_series], textposition='auto'),
+		go.Bar(name='HNSW Connections', x=methods, y=connections_series, text=[f"{c:.1f} GB" for c in connections_series], textposition='auto'),
+		go.Bar(name='Sizing Overhead', x=methods, y=overhead_series, text=[f"{o:.1f} GB" for o in overhead_series], textposition='auto')
 	])
-	fig_all.update_layout(title="Memory Composition Across Compression Methods", yaxis_title="Memory (GB)", barmode='stack', height=420)
-	st.plotly_chart(fig_all, use_container_width=True)
+	fig_all.update_layout(title="Container Memory Composition Across Compression Methods", yaxis_title="Memory (GB)", barmode='stack', height=420)
+	st.plotly_chart(fig_all, width="stretch")
 
 	# Memory breakdown
 	st.markdown("---")
@@ -320,20 +322,24 @@ def display_results(results: ResourceEstimate, params: dict):
 	st.markdown("**📐 Calculation Details**")
 
 	st.code(f"""
-					# Vector Memory (No Compression)
+					# Vector Cache (No Compression)
 					Dimensions: {params['dimensions']}
 					Objects: {format_number(params['num_objects'])}
-					Bytes per vector: {params['dimensions']} × 4 = {params['dimensions'] * 4:,} bytes
-					Total vector memory: {results.vectors_memory_gb:.2f} GB
-					With GC overhead (2x): {results.vectors_memory_gb * 2:.2f} GB
+					Bytes per vector: {params['dimensions']} × 4 + 30 = {params['dimensions'] * 4 + 30:,} bytes
+					Vector data: {results.vector_data_gb:.2f} GB
+					Cache overhead (30B/vector): {results.vector_overhead_gb:.2f} GB
+					Total vector cache: {results.vectors_memory_gb:.2f} GB
 				
-					# HNSW Connections Memory
+					# HNSW Connections
 					Max connections: {params['max_connections']}
-					Avg connections: {params['max_connections'] * 1.5:.0f} connections
-					Bytes per connection: 10
-					Total connections memory: {results.connections_memory_gb:.2f} GB
+					Avg connections: {params['max_connections'] * 1.5:.0f} (1.5× average)
+					Bytes per connection: 4 (variable 2-5B encoding)
+					Connections memory: {results.connections_memory_gb:.2f} GB
 					
-					Total Memory: {results.memory_gb:.2f} GB. Recommended (+25%): {results.recommended_memory_gb:.2f} GB.
+					# Go Heap → GOMEMLIMIT → Container
+					Go Heap: {results.vectors_memory_gb:.2f} + {results.connections_memory_gb:.2f} + 2.00 buffer = {results.go_heap_gb:.2f} GB
+					GOMEMLIMIT: {results.go_heap_gb:.2f} × 1.2 = {results.gomemlimit_gb:.2f} GB
+					Container Memory: {results.gomemlimit_gb:.2f} / 0.8 = {results.memory_gb:.2f} GB
 				""", language="python")
 	
 	st.markdown("---")
@@ -360,7 +366,7 @@ def display_results(results: ResourceEstimate, params: dict):
 
 	st.code(f"""
 					# Basic Disk Storage
-					Vector storage: {results.vectors_memory_gb:.2f} GB
+					Vector storage: {results.vector_data_gb:.2f} GB
 					Objects: {format_number(params['num_objects'])} × 4KB = {(params['num_objects'] * 4 / 1024 / 1024):.2f} GB
 					System overhead (20%): +{results.disk_storage_gb * 0.2:.2f} GB
 					Total disk: {results.disk_storage_gb:.2f} GB
@@ -374,7 +380,7 @@ def display_results(results: ResourceEstimate, params: dict):
 	st.markdown("---")
 	st.subheader("🎯 Deployment Recommendations")
 
-	deployment_type, instance_rec, notes = st.session_state.calculator.get_deployment_recommendation(
+	deployment_type, instance_rec, _ = st.session_state.calculator.get_deployment_recommendation(
 		params['num_objects'], results.memory_gb
 	)
 
@@ -396,7 +402,6 @@ def display_results(results: ResourceEstimate, params: dict):
 			st.markdown(tip)
 
 def how_it_works_tab():
-	"""Combined how it works and guide"""
 	st.markdown("""
 	            ### 🎯 Quick Planning Guide
 	            
@@ -443,28 +448,32 @@ def how_it_works_tab():
 	            ---
 	            ### 🧮 How Calculations Work
 	                
-	            #### Memory Rule of Thumb
+	            #### Memory Sizing Pipeline
 	            ```
-	            Memory = 2 × (Number of vectors × Dimensions × 4 bytes) + HNSW connections
+	            Go Heap     = Vector Cache + HNSW Connections + 2 GB buffer
+	            GOMEMLIMIT  = Go Heap × 1.2
+	            Container   = GOMEMLIMIT / 0.8
 	            ```
 	            
-	            **The 2x multiplier accounts for:**
-	            - Go's garbage collection overhead during imports
-	            - Temporary memory allocations
-	            - Safety buffer for production stability
+	            **The 1.5× Rule:**
+	            - Container memory runs at ~1.5× the Go heap in-use
+	            - OS needs space for page caching (off-heap) for high-speed retrieval
+	            - Always set GOMEMLIMIT to 80% of container memory
 	            
 	            #### Detailed Memory Formula
 	            ```python
-	            # Vector memory
-	            vector_memory = objects × dimensions × 4 bytes
+	            # Vector cache (per vector: dims × 4 + 30 bytes overhead)
+	            vector_cache = objects × (dimensions × 4 + 30) bytes
 	            
 	            # HNSW connections memory
 	            # Base layer: 2 × maxConnections, Upper layers: 1 × maxConnections
 	            # Average: ~1.5 × maxConnections
-	            connections_memory = objects × (maxConnections × 1.5) × 10 bytes
+	            connections_memory = objects × (maxConnections × 1.5) × 4 bytes
 	            
-	            # Total memory with GC overhead
-	            total_memory = (vector_memory × 2) + connections_memory
+	            # Sizing pipeline
+	            go_heap = vector_cache + connections_memory + 2 GB
+	            gomemlimit = go_heap × 1.2
+	            container_memory = gomemlimit / 0.8
 	            ```
 	            
 	            #### CPU Requirements
@@ -548,19 +557,20 @@ def how_it_works_tab():
 	            ### 📋 Step-by-Step Planning
 	            
 	            1. **Count Your Data**: How many documents/items do you have?
-	            2. **Choose Embedding Model**: Pick based on accuracy vs speed needs
-	            3. **Calculate Base Memory**: Objects × Dimensions × 4 bytes
-	            4. **Add Safety Buffer**: Multiply by 2 for garbage collection
-	            5. **Add HNSW Memory**: For the search graph connections
-	            6. **Consider Compression**: Rotational Quantization (RQ) offers 4x compression with 98-99% recall
-	            7. **Plan Deployment**: Docker for <1M, Kubernetes for >1M objects
+	            2. **Set dimensions**: Match your embedding model's output size
+	            3. **Calculate Vector Cache**: Objects × (Dimensions × 4 + 30) bytes
+	            4. **Add HNSW Memory**: For the search graph connections
+	            5. **Calculate Go Heap**: Vector cache + HNSW + 2 GB buffer
+	            6. **Size Container**: GOMEMLIMIT = Heap × 1.2, Container = GOMEMLIMIT / 0.8
+	            7. **Consider Compression**: Reduces vector cache; fixed costs remain
+	            8. **Plan Deployment**: Docker for <1M, Kubernetes for >1M objects
 	            
 	            ### 💡 Best Practices
 	            
 	            **Memory Optimization:**
 	            - Use compression for datasets >5M objects
 	            - Reduce maxConnections for high-dimensional vectors (768D+)
-	            - Consider lower-dimensional models when possible
+	            - Set vectorCacheMaxObjects to control cache growth
 	            - RQ (Rotational Quantization) requires no training phase
 	            
 	            **Performance Tuning:**
@@ -569,15 +579,14 @@ def how_it_works_tab():
 	            - Use SSDs for storage (required for good performance)
 	            - Flat index uses dramatically less RAM than HNSW
 	            
-	            **Cost Optimization:**
-	            - PQ compression can reduce cloud costs by 80%+
-	            - RQ provides 4x compression with 98-99% recall
-	            - Right-size deployment based on actual usage
-	            - Use LIMIT_RESOURCES=true to prevent OOM kills
+	            **Scaling & Stability:**
+	            - Set GOMEMLIMIT to 80% of container memory (prevents OOM kills)
+	            - Scale when heap_inuse exceeds 80% of GOMEMLIMIT
+	            - A 10 GB heap increase needs ~15 GB more container RAM (1.5× rule)
+	            - Always scale before reaching the limit, not after
 	            """)
 
 def references_tab():
-	"""Updated references with latest documentation"""
 	st.markdown("""
 	            📚 Documentation References - All calculations in this tool are based on **official Weaviate documentation**:
 	            
@@ -591,21 +600,19 @@ def references_tab():
 	            
 	            ### Key Formulas Verification
 	            
-	            #### Memory Rule of Thumb ✅
-	            > **"Memory usage = 2 × (the memory footprint of all vectors)"**  
+	            #### Memory Sizing Pipeline ✅
+	            > **Go Heap = Vector Cache + HNSW + Buffer → GOMEMLIMIT = Heap × 1.2 → Container = GOMEMLIMIT / 0.8**  
+	            > **The 1.5× Rule: Container memory ≈ 1.5× Go heap in-use**
 	            
 	            #### HNSW Connections ✅  
-	            > **"Each object in memory has at most maxConnections connections per layer. Each of the connections uses 8-10B of memory. Note that the base layer allows for 2 * maxConnections."**  
+	            > **"Each object has at most maxConnections connections per layer. Connection encoding uses 2-5 bytes (variable). Base layer allows 2 × maxConnections."**  
 	            
 	            ### 🔧 Configuration Examples
 	            
 	            #### Environment Variables
 	            ```bash
-	            # Limit Weaviate to 80% of available memory
-	            LIMIT_RESOURCES=true
-	            
-	            # Set Go memory limit (10-20% of total memory for Weaviate)
-	            GOMEMLIMIT=2GB
+	            # Set Go memory limit to 80% of container memory
+	            GOMEMLIMIT=82GB  # Example: for a ~103 GB container
 	            
 	            # Set maximum CPU threads
 	            GOMAXPROCS=16
